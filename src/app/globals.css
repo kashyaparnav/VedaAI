@@ -1,0 +1,306 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f4f4f4;
+  --foreground: #292929;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+/* =========================================================
+   MAIN APP LAYOUT
+========================================================= */
+
+.app-shell {
+  display: flex;
+  width: 100%;
+  height: 100vh;
+  min-height: 100vh;
+  overflow: hidden;
+  background: #f4f4f4;
+}
+
+.main-area {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  height: 100vh;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* =========================================================
+   ASSESSMENT HEADER
+========================================================= */
+
+.assessment-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  min-height: 56px;
+  height: 56px;
+
+  padding: 0 20px;
+
+  background: #ffffff;
+  border-bottom: 1px solid #e5e5e5;
+
+  flex-shrink: 0;
+}
+
+.assessment-head > span {
+  font-size: 11px;
+  color: #555555;
+}
+
+/* =========================================================
+   QUESTIONS / ANSWERS TABS
+========================================================= */
+
+.segmented {
+  display: flex;
+  align-items: center;
+
+  background: #eeeeee;
+  border-radius: 8px;
+  padding: 3px;
+}
+
+.segmented button {
+  border: 0;
+  background: transparent;
+
+  padding: 7px 15px;
+
+  border-radius: 6px;
+
+  font-size: 13px;
+  color: #777777;
+}
+
+.segmented button.on {
+  background: #ffffff;
+  color: #222222;
+
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+/* =========================================================
+   ASSESSMENT CONTENT
+========================================================= */
+
+.assessment-grid {
+  display: grid;
+
+  grid-template-columns: minmax(0, 42%) minmax(0, 58%);
+
+  flex: 1;
+  min-height: 0;
+
+  width: 100%;
+
+  overflow: hidden;
+}
+
+/* =========================================================
+   QUESTION SIDE
+========================================================= */
+
+.questions-pane {
+  min-width: 0;
+  min-height: 0;
+
+  overflow-y: auto;
+  overflow-x: hidden;
+
+  background: #ffffff;
+
+  border-right: 1px solid #e5e5e5;
+
+  padding: 18px;
+}
+
+/* =========================================================
+   ANSWER SIDE
+========================================================= */
+
+.answer-pane {
+  min-width: 0;
+  min-height: 0;
+
+  overflow: hidden;
+
+  background: #f4f4f4;
+}
+
+/* =========================================================
+   ANSWER VIEWER
+========================================================= */
+
+.viewer-wrap {
+  display: flex;
+  flex-direction: column;
+
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+
+  overflow: hidden;
+}
+
+.viewer-toolbar {
+  display: flex;
+  align-items: center;
+
+  height: 42px;
+  min-height: 42px;
+
+  padding: 0 16px;
+
+  gap: 12px;
+
+  background: #ffffff;
+  border-bottom: 1px solid #e5e5e5;
+
+  font-size: 10px;
+  color: #777777;
+}
+
+.viewer-toolbar button {
+  border: 0;
+  background: transparent;
+
+  color: #777777;
+
+  font-size: 14px;
+  line-height: 1;
+}
+
+.toolbar-divider {
+  width: 1px;
+  height: 16px;
+
+  background: #dddddd;
+}
+
+.paper {
+  position: relative;
+
+  width: min(720px, 90%);
+  min-height: 900px;
+
+  margin: 30px auto;
+
+  padding: 48px 36px;
+
+  background: #ffffff;
+
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+
+  overflow: visible;
+}
+
+.paper p {
+  margin: 0 0 16px;
+
+  font-size: 12px;
+  line-height: 1.7;
+
+  color: #222222;
+}
+
+.paper-margin {
+  position: absolute;
+
+  top: 30px;
+  bottom: 30px;
+  left: 30px;
+
+  width: 1px;
+
+  background: #eeeeee;
+}
+
+/* =========================================================
+   QUESTION LIST SUPPORT
+========================================================= */
+
+.questions-pane > * {
+  max-width: 100%;
+}
+
+/* =========================================================
+   MOBILE
+========================================================= */
+
+@media (max-width: 768px) {
+  .app-shell {
+    height: 100dvh;
+  }
+
+  .main-area {
+    height: 100dvh;
+  }
+
+  .assessment-head {
+    min-height: 52px;
+    height: 52px;
+
+    padding: 0 12px;
+  }
+
+  .assessment-head > span {
+    display: none;
+  }
+
+  .assessment-grid {
+    display: block;
+    overflow: hidden;
+  }
+
+  .questions-pane,
+  .answer-pane {
+    width: 100%;
+    height: 100%;
+    border-right: 0;
+  }
+
+  .hide-mobile {
+    display: none !important;
+  }
+
+  .paper {
+    width: 92%;
+    min-height: 750px;
+
+    margin: 20px auto;
+
+    padding: 35px 25px;
+  }
+}

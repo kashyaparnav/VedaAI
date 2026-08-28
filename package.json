@@ -1,0 +1,29 @@
+{
+  "name": "veda-ai-assessment",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint"
+  },
+  "dependencies": {
+    "@google/genai": "latest",
+    "lucide-react": "latest",
+    "next": "latest",
+    "postcss": "^8.5.26",
+    "react": "latest",
+    "react-dom": "latest",
+    "react-pdf": "^10.5.0",
+    "zod": "latest"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "tailwindcss": "^4.3.3",
+    "typescript": "latest"
+  }
+}

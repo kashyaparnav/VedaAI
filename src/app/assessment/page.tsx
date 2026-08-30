@@ -12,16 +12,18 @@ import { AIReview } from "@/components/assessment/AIReview";
 import type { Question } from "@/types/question";
 import type { Answer } from "@/types/answer";
 
+type GradeStatus =
+  | "correct"
+  | "partially_correct"
+  | "incorrect"
+  | "unanswered";
+
 type GradeResult = {
   questionId: string;
   questionNumber: string;
   obtainedMarks: number;
   maxMarks: number;
-  status:
-    | "correct"
-    | "partially_correct"
-    | "incorrect"
-    | "unanswered";
+  status: GradeStatus;
   feedback: string;
 };
 
@@ -31,6 +33,8 @@ type GradingData = {
   percentage: number;
   results: GradeResult[];
   overallFeedback: string;
+  aiUnavailable?: boolean;
+  error?: string;
 };
 
 type Mapping = {
@@ -56,6 +60,72 @@ type UnmatchedAnswer = {
   boundingBoxes: Answer["boundingBoxes"];
 };
 
+/**
+ * Safely convert any value to a number.
+ */
+function safeNumber(
+  value: unknown,
+  fallback = 0
+): number {
+  const number = Number(value);
+
+  return Number.isFinite(number)
+    ? number
+    : fallback;
+}
+
+/**
+ * Clamp marks so the UI can never show
+ * negative marks or marks greater than max.
+ */
+function clampMarks(
+  value: unknown,
+  maxMarks: unknown
+) {
+  const max = Math.max(
+    0,
+    safeNumber(maxMarks)
+  );
+
+  const obtained = safeNumber(value);
+
+  return Math.min(
+    max,
+    Math.max(0, obtained)
+  );
+}
+
+/**
+ * Convert backend grading status to the status
+ * expected by QuestionList.
+ */
+function questionStatus(
+  status: GradeStatus,
+  obtainedMarks: number,
+  maxMarks: number
+): Question["status"] {
+  if (status === "unanswered") {
+    return "unanswered";
+  }
+
+  if (
+    status === "correct" ||
+    (maxMarks > 0 &&
+      obtainedMarks >= maxMarks)
+  ) {
+    return "answered";
+  }
+
+  if (
+    status === "partially_correct" ||
+    obtainedMarks > 0
+  ) {
+    return "partial";
+  }
+
+  return "unanswered";
+}
+
 export default function AssessmentPage() {
   const [questions, setQuestions] =
     useState<Question[]>([]);
@@ -66,11 +136,15 @@ export default function AssessmentPage() {
   const [mappings, setMappings] =
     useState<Mapping[]>([]);
 
-  const [unansweredQuestions, setUnansweredQuestions] =
-    useState<UnansweredQuestion[]>([]);
+  const [
+    unansweredQuestions,
+    setUnansweredQuestions,
+  ] = useState<UnansweredQuestion[]>([]);
 
-  const [unmatchedAnswers, setUnmatchedAnswers] =
-    useState<UnmatchedAnswer[]>([]);
+  const [
+    unmatchedAnswers,
+    setUnmatchedAnswers,
+  ] = useState<UnmatchedAnswer[]>([]);
 
   const [grading, setGrading] =
     useState<GradingData | null>(null);
@@ -130,7 +204,9 @@ export default function AssessmentPage() {
       const extractedMappings: Mapping[] =
         Array.isArray(mappingResponse)
           ? mappingResponse
-          : Array.isArray(mappingResponse?.mappings)
+          : Array.isArray(
+                mappingResponse?.mappings
+              )
             ? mappingResponse.mappings
             : [];
 
@@ -155,7 +231,7 @@ export default function AssessmentPage() {
 
       /*
        * =======================================================
-       * APPLY GRADING + MAPPING TO QUESTIONS
+       * BUILD FINAL QUESTIONS
        * =======================================================
        */
 
@@ -182,51 +258,70 @@ export default function AssessmentPage() {
               : undefined;
 
           /*
-           * No grading result.
+           * ---------------------------------------------------
+           * NO AI GRADING RESULT
+           * ---------------------------------------------------
            */
+
           if (!result) {
             return {
               ...question,
               answerId: answer?.id,
               aiFeedback: undefined,
-              obtainedMarks: answer
-                ? question.obtainedMarks
-                : 0,
+              obtainedMarks: 0,
               status: answer
                 ? "answered"
                 : "unanswered",
             };
           }
 
-          const obtained = Number(
-            result.obtainedMarks ?? 0
+          /*
+           * ---------------------------------------------------
+           * NORMALIZE AI RESULT
+           * ---------------------------------------------------
+           */
+
+          const maxMarks = Math.max(
+            0,
+            safeNumber(
+              result.maxMarks,
+              safeNumber(question.marks)
+            )
           );
 
-          const maxMarks = Number(
-            result.maxMarks ??
-              question.marks ??
-              0
+          const obtained = clampMarks(
+            result.obtainedMarks,
+            maxMarks
           );
 
-          let status: Question["status"];
+          /*
+           * IMPORTANT:
+           *
+           * Do NOT convert an explicit "incorrect"
+           * result into "unanswered".
+           *
+           * Previously the UI did:
+           *
+           * obtained = 0
+           *       ↓
+           * status = unanswered
+           *
+           * even when Gemini explicitly said
+           * "incorrect".
+           */
 
-          if (
+          const status =
             result.status === "unanswered"
-          ) {
-            status = "unanswered";
-          } else if (
-            obtained >= maxMarks &&
-            maxMarks > 0
-          ) {
-            status = "answered";
-          } else if (obtained > 0) {
-            status = "partial";
-          } else {
-            status = "unanswered";
-          }
+              ? "unanswered"
+              : questionStatus(
+                  result.status,
+                  obtained,
+                  maxMarks
+                );
 
           return {
             ...question,
+            marks: maxMarks,
             obtainedMarks: obtained,
             status,
             answerId: answer?.id,
@@ -238,12 +333,15 @@ export default function AssessmentPage() {
       setQuestions(gradedQuestions);
       setAnswers(extractedAnswers);
       setMappings(extractedMappings);
+
       setUnansweredQuestions(
         extractedUnanswered
       );
+
       setUnmatchedAnswers(
         extractedUnmatched
       );
+
       setGrading(extractedGrading);
 
       if (gradedQuestions.length > 0) {
@@ -277,7 +375,7 @@ export default function AssessmentPage() {
 
   /*
    * =========================================================
-   * FIND MAPPING FOR ACTIVE QUESTION
+   * FIND MAPPING
    * =========================================================
    */
 
@@ -294,7 +392,7 @@ export default function AssessmentPage() {
 
   /*
    * =========================================================
-   * FIND ANSWER USING MAPPING
+   * FIND ANSWER
    * =========================================================
    */
 
@@ -311,7 +409,7 @@ export default function AssessmentPage() {
 
   /*
    * =========================================================
-   * PAGE + ALL BOUNDING BOXES
+   * ANSWER PAGE
    * =========================================================
    */
 
@@ -320,57 +418,70 @@ export default function AssessmentPage() {
     answer?.page ??
     1;
 
+  /*
+   * =========================================================
+   * BOUNDING BOXES
+   * =========================================================
+   */
+
   const boundingBoxes =
     mapping?.boundingBoxes?.length
       ? mapping.boundingBoxes
       : answer?.boundingBoxes ?? [];
 
   /*
-   * Keep the existing AnswerViewer interface
-   * by sending the first box.
-   *
-   * We will upgrade it to accept multiple
-   * boxes in the next step.
-   */
-
-  const region =
-    boundingBoxes[0];
-
-  /*
    * =========================================================
    * SCORE
+   *
+   * IMPORTANT:
+   * Calculate from the actual question results.
+   *
+   * This avoids showing stale "0" from the backend
+   * when the result object is incomplete.
    * =========================================================
    */
 
-  const totalMarks =
-    grading?.outOf ??
-    questions.reduce(
+  const totalMarks = useMemo(() => {
+    return questions.reduce(
       (sum, item) =>
         sum +
-        Number(item.marks || 0),
+        safeNumber(item.marks),
       0
     );
+  }, [questions]);
 
-  const obtainedMarks =
-    grading?.total ??
-    questions.reduce(
+  const obtainedMarks = useMemo(() => {
+    return questions.reduce(
       (sum, item) =>
         sum +
-        Number(
-          item.obtainedMarks || 0
+        clampMarks(
+          item.obtainedMarks,
+          item.marks
         ),
       0
     );
+  }, [questions]);
 
-  const percentage =
-    grading?.percentage ??
-    (totalMarks > 0
-      ? Math.round(
-          (obtainedMarks /
-            totalMarks) *
-            100
-        )
-      : 0);
+  const percentage = useMemo(() => {
+    if (totalMarks <= 0) {
+      return 0;
+    }
+
+    return Math.round(
+      (obtainedMarks /
+        totalMarks) *
+        100
+    );
+  }, [obtainedMarks, totalMarks]);
+
+  /*
+   * =========================================================
+   * AI STATUS
+   * =========================================================
+   */
+
+  const aiUnavailable =
+    grading?.aiUnavailable === true;
 
   /*
    * =========================================================
@@ -484,6 +595,23 @@ export default function AssessmentPage() {
         </div>
 
         {/* =====================================================
+            AI UNAVAILABLE WARNING
+        ===================================================== */}
+
+        {aiUnavailable && (
+          <div className="mx-4 mt-3 rounded-[8px] border border-[#f5c2b8] bg-[#fff5f2] px-4 py-3">
+            <div className="text-[11px] font-semibold text-[#d83a17]">
+              AI grading is temporarily unavailable
+            </div>
+
+            <div className="mt-1 text-[10px] text-[#777]">
+              {grading?.error ||
+                "The answers were extracted and mapped, but AI grading could not be completed."}
+            </div>
+          </div>
+        )}
+
+        {/* =====================================================
             SCORE SUMMARY
         ===================================================== */}
 
@@ -514,12 +642,22 @@ export default function AssessmentPage() {
             </div>
 
             <div className="text-[13px] font-semibold text-[#ff5630]">
-              {obtainedMarks}
+              {aiUnavailable
+                ? "—"
+                : obtainedMarks}
             </div>
           </div>
 
-          <div className="ml-auto rounded-full bg-[#e9f8ed] px-4 py-2 text-[10px] font-medium text-[#4da85b]">
-            {percentage}% Score
+          <div
+            className={
+              aiUnavailable
+                ? "ml-auto rounded-full bg-[#f4f4f4] px-4 py-2 text-[10px] font-medium text-[#777]"
+                : "ml-auto rounded-full bg-[#e9f8ed] px-4 py-2 text-[10px] font-medium text-[#4da85b]"
+            }
+          >
+            {aiUnavailable
+              ? "AI Grading Pending"
+              : `${percentage}% Score`}
           </div>
         </div>
 
@@ -547,7 +685,9 @@ export default function AssessmentPage() {
               }}
             />
 
-            {/* Unanswered summary */}
+            {/* =================================================
+                UNANSWERED SUMMARY
+            ================================================= */}
 
             {unansweredQuestions.length >
               0 && (
@@ -570,7 +710,9 @@ export default function AssessmentPage() {
               </div>
             )}
 
-            {/* Unmatched summary */}
+            {/* =================================================
+                UNMATCHED ANSWERS
+            ================================================= */}
 
             {unmatchedAnswers.length >
               0 && (
@@ -593,9 +735,15 @@ export default function AssessmentPage() {
               </div>
             )}
 
+            {/* =================================================
+                AI FEEDBACK
+            ================================================= */}
+
             <AIReview
               feedback={
-                grading?.overallFeedback
+                aiUnavailable
+                  ? "AI grading is currently unavailable. Answer extraction and mapping are still available."
+                  : grading?.overallFeedback
               }
             />
           </div>
@@ -613,7 +761,7 @@ export default function AssessmentPage() {
           >
             {question && (
               <AnswerViewer
-                region={region}
+                regions={boundingBoxes}
                 label={`Q${question.number}`}
                 page={answerPage}
               />

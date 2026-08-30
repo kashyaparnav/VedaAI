@@ -32,12 +32,31 @@ type AIMapping = {
   reason?: string;
 };
 
+type Mapping = {
+  answerId: string;
+  questionId: string;
+  questionNumber: string;
+  page: number;
+  boundingBoxes: BoundingBox[];
+  confidence: number;
+  source: "direct" | "number" | "ai";
+  reason?: string;
+};
+
 function normalizeQuestionNumber(value: string = "") {
   return value
     .toLowerCase()
     .replace(/\s+/g, "")
     .replace(/[-–—]/g, "")
     .replace(/[.)]+$/g, "");
+}
+
+function clampConfidence(value: unknown, fallback = 0.8) {
+  if (typeof value !== "number") {
+    return fallback;
+  }
+
+  return Math.max(0, Math.min(1, value));
 }
 
 export async function POST(request: Request) {
@@ -57,53 +76,58 @@ export async function POST(request: Request) {
         {
           error: "Questions are required for mapping.",
         },
-        { status: 400 }
+        {
+          status: 400,
+        }
       );
-    }
-
-    if (!answers.length) {
-      return NextResponse.json({
-        mappings: [],
-        unansweredQuestions: questions.map((question) => ({
-          questionId: question.id,
-          questionNumber: question.number,
-        })),
-        unmatchedAnswers: [],
-      });
     }
 
     /*
      * ============================================================
      * 1. DIRECT / EXACT MAPPING
      * ============================================================
+     *
+     * First try:
+     *   answer.questionId
+     *
+     * Then:
+     *   answer.questionNumber
+     *
+     * IMPORTANT:
+     * We intentionally DO NOT mark a question as used.
+     *
+     * This allows answers to span multiple pages or appear as
+     * multiple extracted answer fragments.
      */
 
-    const mappings: {
-      answerId: string;
-      questionId: string;
-      questionNumber: string;
-      page: number;
-      boundingBoxes: BoundingBox[];
-      confidence: number;
-      source: "direct" | "number" | "ai";
-    }[] = [];
+    const mappings: Mapping[] = [];
 
     const unmatchedForAI: Answer[] = [];
 
-    const usedQuestionIds = new Set<string>();
     const usedAnswerIds = new Set<string>();
 
     for (const answer of answers) {
       let question: Question | undefined;
+      let source: "direct" | "number" | null = null;
 
+      // ----------------------------------------------------------
       // First priority: exact questionId
+      // ----------------------------------------------------------
+
       if (answer.questionId) {
         question = questions.find(
           (item) => item.id === answer.questionId
         );
+
+        if (question) {
+          source = "direct";
+        }
       }
 
+      // ----------------------------------------------------------
       // Second priority: question number
+      // ----------------------------------------------------------
+
       if (!question && answer.questionNumber) {
         const normalizedAnswerNumber =
           normalizeQuestionNumber(answer.questionNumber);
@@ -113,20 +137,30 @@ export async function POST(request: Request) {
             normalizeQuestionNumber(item.number) ===
             normalizedAnswerNumber
         );
+
+        if (question) {
+          source = "number";
+        }
       }
 
-      if (question && !usedQuestionIds.has(question.id)) {
+      // ----------------------------------------------------------
+      // Create direct mapping
+      // ----------------------------------------------------------
+
+      if (question && source) {
         mappings.push({
           answerId: answer.id,
           questionId: question.id,
           questionNumber: question.number,
           page: answer.page,
           boundingBoxes: answer.boundingBoxes ?? [],
-          confidence: answer.confidence ?? 1,
-          source: answer.questionId ? "direct" : "number",
+          confidence: clampConfidence(
+            answer.confidence,
+            source === "direct" ? 1 : 0.95
+          ),
+          source,
         });
 
-        usedQuestionIds.add(question.id);
         usedAnswerIds.add(answer.id);
       } else {
         unmatchedForAI.push(answer);
@@ -140,35 +174,62 @@ export async function POST(request: Request) {
      */
 
     if (unmatchedForAI.length > 0) {
-      const availableQuestions = questions.filter(
-        (question) => !usedQuestionIds.has(question.id)
-      );
+      /*
+       * All questions remain available.
+       *
+       * This is intentional because:
+       * - answers can span multiple pages
+       * - extraction can produce multiple answer fragments
+       * - multiple fragments may belong to the same question
+       */
 
-      if (availableQuestions.length > 0) {
-        const mappingPrompt = `
+      const availableQuestions = questions;
+
+      const mappingPrompt = `
 You are an expert exam answer-mapping system.
 
-Your job is to map student answers to the correct extracted exam questions.
+Your job is to map extracted student answers to the correct
+questions from an exam paper.
 
 IMPORTANT RULES:
 
 1. Use ONLY the question IDs provided below.
+
 2. Use ONLY the answer IDs provided below.
+
 3. Never invent IDs.
-4. Match based on:
+
+4. Match answers using:
    - question number
    - question wording
    - subject/topic
    - answer content
    - labelled sub-parts such as 11(a), 11(b)
+
 5. Answers may appear OUT OF ORDER.
-6. Some answers may not belong to any question.
-7. Some questions may have NO answer.
-8. If an answer clearly does not belong to any question, return questionId: null.
-9. Do not force a match.
-10. Return one mapping for EVERY answer supplied.
-11. A question can only be assigned to one answer in this mapping call.
-12. Preserve the exact IDs.
+
+6. Some answers may span MULTIPLE PAGES.
+
+7. Some extracted answer objects may represent different
+   fragments of the SAME question.
+
+8. Multiple answer objects MAY map to the same question when
+   they clearly belong to that question.
+
+9. Some answers may not belong to any question.
+
+10. Some questions may have NO answer.
+
+11. If an answer clearly does not belong to any question,
+    return questionId: null.
+
+12. DO NOT force a match.
+
+13. Return exactly ONE mapping object for EVERY answer supplied.
+
+14. Preserve exact IDs.
+
+15. Confidence must be between 0 and 1.
 
 QUESTIONS:
 
@@ -209,84 +270,96 @@ Return ONLY valid JSON in exactly this structure:
   ]
 }
 
-Confidence must be between 0 and 1.
-
 Do not include any text outside the JSON.
 `;
 
-        try {
-          const aiResult = await generateGeminiJSON([
-            {
-              text: mappingPrompt,
-            },
-          ]);
+      try {
+        const aiResult = await generateGeminiJSON([
+          {
+            text: mappingPrompt,
+          },
+        ]);
 
-          const aiMappings: AIMapping[] =
-            Array.isArray(aiResult?.mappings)
-              ? aiResult.mappings
-              : [];
+        const aiMappings: AIMapping[] = Array.isArray(
+          aiResult?.mappings
+        )
+          ? aiResult.mappings
+          : [];
 
-          for (const aiMapping of aiMappings) {
-            if (!aiMapping?.answerId) {
-              continue;
-            }
-
-            const answer = unmatchedForAI.find(
-              (item) => item.id === aiMapping.answerId
-            );
-
-            if (!answer) {
-              continue;
-            }
-
-            if (!aiMapping.questionId) {
-              continue;
-            }
-
-            const question = availableQuestions.find(
-              (item) => item.id === aiMapping.questionId
-            );
-
-            if (!question) {
-              continue;
-            }
-
-            if (usedQuestionIds.has(question.id)) {
-              continue;
-            }
-
-            if (usedAnswerIds.has(answer.id)) {
-              continue;
-            }
-
-            mappings.push({
-              answerId: answer.id,
-              questionId: question.id,
-              questionNumber: question.number,
-              page: answer.page,
-              boundingBoxes: answer.boundingBoxes ?? [],
-              confidence:
-                typeof aiMapping.confidence === "number"
-                  ? Math.max(
-                      0,
-                      Math.min(1, aiMapping.confidence)
-                    )
-                  : 0.8,
-              source: "ai",
-            });
-
-            usedQuestionIds.add(question.id);
-            usedAnswerIds.add(answer.id);
+        for (const aiMapping of aiMappings) {
+          if (!aiMapping?.answerId) {
+            continue;
           }
-        } catch (aiError) {
-          console.error(
-            "AI answer mapping failed:",
-            aiError
+
+          // ------------------------------------------------------
+          // Find answer
+          // ------------------------------------------------------
+
+          const answer = unmatchedForAI.find(
+            (item) => item.id === aiMapping.answerId
           );
 
-          // We intentionally continue.
-          // Answers that AI cannot map will be marked unmatched.
+          if (!answer) {
+            continue;
+          }
+
+          // Already mapped
+          if (usedAnswerIds.has(answer.id)) {
+            continue;
+          }
+
+          // ------------------------------------------------------
+          // Unmatched answer
+          // ------------------------------------------------------
+
+          if (!aiMapping.questionId) {
+            continue;
+          }
+
+          // ------------------------------------------------------
+          // Find question
+          // ------------------------------------------------------
+
+          const question = availableQuestions.find(
+            (item) => item.id === aiMapping.questionId
+          );
+
+          if (!question) {
+            continue;
+          }
+
+          // ------------------------------------------------------
+          // Add AI mapping
+          // ------------------------------------------------------
+
+          mappings.push({
+            answerId: answer.id,
+            questionId: question.id,
+            questionNumber: question.number,
+            page: answer.page,
+            boundingBoxes: answer.boundingBoxes ?? [],
+            confidence: clampConfidence(
+              aiMapping.confidence,
+              0.8
+            ),
+            source: "ai",
+            reason: aiMapping.reason,
+          });
+
+          usedAnswerIds.add(answer.id);
         }
+      } catch (aiError) {
+        console.error(
+          "AI answer mapping failed:",
+          aiError
+        );
+
+        /*
+         * We intentionally continue.
+         *
+         * Answers that AI cannot map will appear under
+         * unmatchedAnswers.
+         */
       }
     }
 
@@ -297,13 +370,21 @@ Do not include any text outside the JSON.
      */
 
     const unmatchedAnswers = answers
-      .filter((answer) => !usedAnswerIds.has(answer.id))
+      .filter(
+        (answer) => !usedAnswerIds.has(answer.id)
+      )
       .map((answer) => ({
         answerId: answer.id,
-        questionNumber: answer.questionNumber ?? null,
+        questionNumber:
+          answer.questionNumber ?? null,
         page: answer.page,
         text: answer.text,
-        boundingBoxes: answer.boundingBoxes ?? [],
+        boundingBoxes:
+          answer.boundingBoxes ?? [],
+        confidence: clampConfidence(
+          answer.confidence,
+          0
+        ),
       }));
 
     /*
@@ -312,9 +393,16 @@ Do not include any text outside the JSON.
      * ============================================================
      */
 
+    const answeredQuestionIds = new Set(
+      mappings.map(
+        (mapping) => mapping.questionId
+      )
+    );
+
     const unansweredQuestions = questions
       .filter(
-        (question) => !usedQuestionIds.has(question.id)
+        (question) =>
+          !answeredQuestionIds.has(question.id)
       )
       .map((question) => ({
         questionId: question.id,
@@ -335,10 +423,19 @@ Do not include any text outside the JSON.
     );
 
     mappings.sort((a, b) => {
-      return (
-        (questionOrder.get(a.questionId) ?? 999999) -
-        (questionOrder.get(b.questionId) ?? 999999)
-      );
+      const questionDifference =
+        (questionOrder.get(a.questionId) ??
+          999999) -
+        (questionOrder.get(b.questionId) ??
+          999999);
+
+      if (questionDifference !== 0) {
+        return questionDifference;
+      }
+
+      // If same question has multiple pages,
+      // keep answers in page order.
+      return a.page - b.page;
     });
 
     /*
@@ -356,8 +453,12 @@ Do not include any text outside the JSON.
         totalQuestions: questions.length,
         totalAnswers: answers.length,
         mappedAnswers: mappings.length,
-        unansweredQuestions: unansweredQuestions.length,
-        unmatchedAnswers: unmatchedAnswers.length,
+        answeredQuestions:
+          answeredQuestionIds.size,
+        unansweredQuestions:
+          unansweredQuestions.length,
+        unmatchedAnswers:
+          unmatchedAnswers.length,
       },
     });
   } catch (error) {
@@ -373,7 +474,9 @@ Do not include any text outside the JSON.
             ? error.message
             : "Answer mapping failed.",
       },
-      { status: 500 }
+      {
+        status: 500,
+      }
     );
   }
 }

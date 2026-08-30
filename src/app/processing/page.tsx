@@ -307,54 +307,132 @@ export default function ProcessingPage() {
           updateSteps(4);
         }
 
-        /*
-         * =====================================================
-         * 5. GRADE
-         * =====================================================
-         */
+        
+ if (mounted) {
+  setProgress(88);
+  setStatus("Evaluating answers...");
+  updateSteps(4);
+}
 
-        if (mounted) {
-          setProgress(88);
-          setStatus(
-            "Evaluating answers..."
-          );
-          updateSteps(4);
-        }
+let gradeResult: any = {
+  total: 0,
+  outOf: questionResult.questions.reduce(
+    (sum: number, question: any) =>
+      sum + Number(question.marks || 0),
+    0
+  ),
+  percentage: 0,
+  results: [],
+  overallFeedback:
+    "AI grading is temporarily unavailable.",
+  aiUnavailable: false,
+};
 
-        const gradeResponse =
-          await fetch(
-            "/api/grade",
-            {
-              method: "POST",
-              headers: {
-                "Content-Type":
-                  "application/json",
-              },
-              body: JSON.stringify({
-                questions:
-                  questionResult.questions,
-                answers:
-                  answerResult.answers,
-                mappings:
-                  mapResult?.mappings ?? [],
-              }),
-            }
-          );
+try {
+  const gradeResponse = await fetch(
+    "/api/grade",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        questions: questionResult.questions,
+        answers: answerResult.answers,
+        mappings: mapResult?.mappings ?? [],
+        unansweredQuestions:
+          mapResult?.unansweredQuestions ?? [],
+        unmatchedAnswers:
+          mapResult?.unmatchedAnswers ?? [],
+      }),
+    }
+  );
 
-        const gradeResult =
-          await gradeResponse.json();
+  const result = await gradeResponse.json();
 
-        if (!gradeResponse.ok) {
-          throw new Error(
-            gradeResult?.error ||
-              "Grading failed."
-          );
-        }
+  if (gradeResponse.ok) {
+    gradeResult = result;
+  } else {
+    console.warn(
+      "AI grading unavailable:",
+      result?.error
+    );
 
-        sessionStorage.setItem(
-          "veda-grading-result",
-          JSON.stringify(gradeResult)
-        );
+    gradeResult = {
+      ...gradeResult,
+      aiUnavailable: true,
+      error:
+        result?.error ||
+        "AI grading is temporarily unavailable.",
+    };
+  }
+} catch (gradingError) {
+  console.warn(
+    "AI grading failed.",
+    gradingError
+  );
+
+  gradeResult = {
+    ...gradeResult,
+    aiUnavailable: true,
+    error:
+      "AI grading is temporarily unavailable.",
+  };
+}
+
+sessionStorage.setItem(
+  "veda-grading-result",
+  JSON.stringify(gradeResult)
+);
+ 
+
+if (mounted) {
+  setProgress(100);
+
+  setStatus(
+    "Assessment ready!"
+  );
+
+  setSteps([
+    {
+      label:
+        "Reading uploaded files",
+      status: "completed",
+    },
+    {
+      label:
+        "Extracting questions",
+      status: "completed",
+    },
+    {
+      label:
+        "Extracting answers",
+      status: "completed",
+    },
+    {
+      label:
+        "Mapping answers",
+      status: "completed",
+    },
+    {
+      label:
+        "Evaluating answers",
+      status: "completed",
+    },
+    {
+      label:
+        "Assessment ready",
+      status: "completed",
+    },
+  ]);
+}
+
+setTimeout(() => {
+  if (mounted) {
+    window.location.href =
+      "/assessment";
+  }
+}, 700);
 
         /*
          * =====================================================

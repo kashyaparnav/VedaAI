@@ -16,7 +16,7 @@ import "react-pdf/dist/Page/TextLayer.css";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 
 interface AnswerViewerProps {
-  region?: BoundingBox;
+  regions?: BoundingBox[];
   label: string;
   page?: number;
 }
@@ -24,7 +24,7 @@ interface AnswerViewerProps {
 type PDFModule = typeof import("react-pdf");
 
 export function AnswerViewer({
-  region,
+  regions = [],
   label,
   page = 1,
 }: AnswerViewerProps) {
@@ -49,11 +49,9 @@ export function AnswerViewer({
   const [loadingPdf, setLoadingPdf] =
     useState(true);
 
-  /*
-   * =========================================================
-   * LOAD REACT-PDF ONLY IN THE BROWSER
-   * =========================================================
-   */
+  // ============================================================
+  // LOAD REACT-PDF
+  // ============================================================
 
   useEffect(() => {
     let mounted = true;
@@ -62,10 +60,6 @@ export function AnswerViewer({
       try {
         const module = await import("react-pdf");
 
-        /*
-         * Configure PDF.js worker after the module
-         * has been loaded in the browser.
-         */
         module.pdfjs.GlobalWorkerOptions.workerSrc =
           `https://unpkg.com/pdfjs-dist@${module.pdfjs.version}/build/pdf.worker.min.mjs`;
 
@@ -95,11 +89,9 @@ export function AnswerViewer({
     };
   }, []);
 
-  /*
-   * =========================================================
-   * LOAD ANSWER SHEET
-   * =========================================================
-   */
+  // ============================================================
+  // LOAD ANSWER SHEET
+  // ============================================================
 
   useEffect(() => {
     let objectUrl: string | null = null;
@@ -108,8 +100,9 @@ export function AnswerViewer({
       try {
         setError("");
 
-        const file =
-          await getFile("answer-sheet");
+        const file = await getFile(
+          "answer-sheet"
+        );
 
         if (!file) {
           setError(
@@ -118,9 +111,6 @@ export function AnswerViewer({
           return;
         }
 
-        /*
-         * Make sure the retrieved object is a File/Blob.
-         */
         if (!(file instanceof Blob)) {
           setError(
             "Invalid answer sheet file."
@@ -153,11 +143,9 @@ export function AnswerViewer({
     };
   }, []);
 
-  /*
-   * =========================================================
-   * CHANGE PAGE WHEN QUESTION CHANGES
-   * =========================================================
-   */
+  // ============================================================
+  // CHANGE PAGE WHEN SELECTED ANSWER CHANGES
+  // ============================================================
 
   useEffect(() => {
     if (
@@ -169,11 +157,9 @@ export function AnswerViewer({
     }
   }, [page, numPages]);
 
-  /*
-   * =========================================================
-   * PDF LOAD SUCCESS
-   * =========================================================
-   */
+  // ============================================================
+  // PDF LOAD SUCCESS
+  // ============================================================
 
   function handleDocumentLoadSuccess({
     numPages: totalPages,
@@ -195,11 +181,9 @@ export function AnswerViewer({
     setCurrentPage(safePage);
   }
 
-  /*
-   * =========================================================
-   * PAGE CONTROLS
-   * =========================================================
-   */
+  // ============================================================
+  // PAGE CONTROLS
+  // ============================================================
 
   function previousPage() {
     setCurrentPage((value) =>
@@ -216,11 +200,9 @@ export function AnswerViewer({
     );
   }
 
-  /*
-   * =========================================================
-   * ZOOM CONTROLS
-   * =========================================================
-   */
+  // ============================================================
+  // ZOOM
+  // ============================================================
 
   function zoomOut() {
     setScale((value) =>
@@ -234,11 +216,9 @@ export function AnswerViewer({
     );
   }
 
-  /*
-   * =========================================================
-   * LOADING
-   * =========================================================
-   */
+  // ============================================================
+  // LOADING
+  // ============================================================
 
   if (loadingPdf) {
     return (
@@ -258,11 +238,9 @@ export function AnswerViewer({
     );
   }
 
-  /*
-   * =========================================================
-   * ERROR
-   * =========================================================
-   */
+  // ============================================================
+  // ERROR
+  // ============================================================
 
   if (error) {
     return (
@@ -288,11 +266,9 @@ export function AnswerViewer({
     );
   }
 
-  /*
-   * =========================================================
-   * PDF COMPONENTS
-   * =========================================================
-   */
+  // ============================================================
+  // PDF COMPONENTS
+  // ============================================================
 
   const PDFDocument =
     pdfModule?.Document;
@@ -302,12 +278,12 @@ export function AnswerViewer({
 
   return (
     <div className="viewer-wrap">
-      {/* =====================================================
+
+      {/* ======================================================
           TOOLBAR
-      ===================================================== */}
+      ====================================================== */}
 
       <div className="viewer-toolbar">
-        {/* Zoom out */}
 
         <button
           type="button"
@@ -322,8 +298,6 @@ export function AnswerViewer({
           {Math.round(scale * 100)}%
         </b>
 
-        {/* Zoom in */}
-
         <button
           type="button"
           onClick={zoomIn}
@@ -334,8 +308,6 @@ export function AnswerViewer({
         </button>
 
         <span className="toolbar-divider" />
-
-        {/* Previous page */}
 
         <button
           type="button"
@@ -351,8 +323,6 @@ export function AnswerViewer({
           {numPages || 1}
         </b>
 
-        {/* Next page */}
-
         <button
           type="button"
           onClick={nextPage}
@@ -366,9 +336,9 @@ export function AnswerViewer({
         </button>
       </div>
 
-      {/* =====================================================
+      {/* ======================================================
           PDF AREA
-      ===================================================== */}
+      ====================================================== */}
 
       <div
         className="
@@ -427,15 +397,21 @@ export function AnswerViewer({
                 />
 
                 {/* =================================================
-                    AI ANSWER HIGHLIGHT
+                    ANSWER HIGHLIGHTS
                 ================================================= */}
 
-                {region && (
-                  <AnswerHighlight
-                    box={region}
-                    label={label}
-                  />
-                )}
+                {currentPage === page &&
+                  regions.map((box, index) => (
+                    <AnswerHighlight
+                      key={`answer-highlight-${index}`}
+                      box={box}
+                      label={
+                        regions.length > 1
+                          ? `${label} ${index + 1}`
+                          : label
+                      }
+                    />
+                  ))}
               </div>
             </PDFDocument>
           )}

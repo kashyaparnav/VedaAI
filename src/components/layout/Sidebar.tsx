@@ -60,20 +60,22 @@ export default function Sidebar() {
             AI TEACHER'S TOOLKIT
         ===================================================== */}
 
-        <button
-          type="button"
-          className="mt-[28px] flex h-[30px] w-full shrink-0 items-center justify-center gap-[6px] overflow-hidden rounded-full border-[2px] border-[#ff6848] bg-[#303030] px-[8px] text-[10px] font-medium leading-none text-white transition hover:bg-[#242424]"
-        >
-          <Sparkles
-            size={12}
-            strokeWidth={2}
-            className="shrink-0"
-          />
+       <button
+  type="button"
+  className="mx-auto mt-[28px] flex h-[32px] w-[164px] shrink-0 items-center justify-center rounded-full border-[2px] border-[#ff6848] bg-[#303030] px-[8px] outline-none transition hover:bg-[#242424] focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
+>
+  <span className="flex items-center justify-center gap-[6px] whitespace-nowrap">
+    <Sparkles
+      size={11}
+      strokeWidth={2}
+      className="shrink-0 text-white"
+    />
 
-          <span className="shrink-0 whitespace-nowrap">
-            AI Teacher's Toolkit
-          </span>
-        </button>
+    <span className="whitespace-nowrap text-[9px] font-medium leading-none text-white">
+      AI Teacher's Toolkit
+    </span>
+  </span>
+</button>
 
 
         {/* =====================================================
